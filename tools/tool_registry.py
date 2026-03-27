@@ -180,10 +180,9 @@ search_fixtures_tool = ToolDefinition(
 
 find_events_tool = ToolDefinition(
     name="FindEvents",
-    description="Find upcoming events to travel to a given city (e.g., 'Melbourne') and a date or month. "
+    description="Find upcoming events to travel to a given city (e.g., 'Melbourne') and a month. "
     "It knows about events in Oceania only (e.g. major Australian and New Zealand cities). "
-    "It will search 1 month either side of the month provided. "
-    "Returns a list of events. ",
+    "Returns events that overlap with the specified month. ",
     arguments=[
         ToolArgument(
             name="city",
@@ -193,7 +192,7 @@ find_events_tool = ToolDefinition(
         ToolArgument(
             name="month",
             type="string",
-            description="The month to search for events (will search 1 month either side of the month provided)",
+            description="The month to search for events (e.g., 'April')",
         ),
     ],
 )

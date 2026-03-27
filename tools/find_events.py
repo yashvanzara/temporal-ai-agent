@@ -1,9 +1,21 @@
+import calendar
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
-def find_events(args: dict) -> dict:
+def find_events(args: dict[str, Any]) -> dict[str, Any]:
+    """Find events that overlap with a given month in a specified city.
+
+    Args:
+        args: Dictionary containing:
+            - city: City name to search for events (e.g., 'Melbourne')
+            - month: Month name to search (e.g., 'April')
+
+    Returns:
+        Dictionary with 'events' list and 'note' with search context.
+    """
     search_city = args.get("city", "").lower()
     search_month = args.get("month", "").capitalize()
 
@@ -16,36 +28,33 @@ def find_events(args: dict) -> dict:
     except ValueError:
         return {"error": "Invalid month provided."}
 
-    # Helper to wrap months into [1..12]
-    def get_adjacent_months(m):
-        prev_m = 12 if m == 1 else (m - 1)
-        next_m = 1 if m == 12 else (m + 1)
-        return [prev_m, m, next_m]
+    # Determine the target year: use next upcoming occurrence of the month
+    today = datetime.now()
+    if month_number >= today.month:
+        target_year = today.year
+    else:
+        target_year = today.year + 1
 
-    valid_months = get_adjacent_months(month_number)
+    # Build the search month date range
+    month_start = datetime(target_year, month_number, 1)
+    last_day = calendar.monthrange(target_year, month_number)[1]
+    month_end = datetime(target_year, month_number, last_day)
 
     matching_events = []
-    for city_name, events in json.load(open(file_path)).items():
+    with open(file_path) as f:
+        data = json.load(f)
+
+    for city_name, events in data.items():
         if search_city and search_city not in city_name.lower():
             continue
 
         for event in events:
-            date_from = datetime.strptime(event["dateFrom"], "%Y-%m-%d")
-            date_to = datetime.strptime(event["dateTo"], "%Y-%m-%d")
+            event_start = datetime.strptime(event["dateFrom"], "%Y-%m-%d")
+            event_end = datetime.strptime(event["dateTo"], "%Y-%m-%d")
 
-            # If the event's start or end month is in our valid months
-            if date_from.month in valid_months or date_to.month in valid_months:
-                # Add metadata explaining how it matches
-                if date_from.month == month_number or date_to.month == month_number:
-                    month_context = "requested month"
-                elif (
-                    date_from.month == valid_months[0]
-                    or date_to.month == valid_months[0]
-                ):
-                    month_context = "previous month"
-                else:
-                    month_context = "next month"
-
+            # Check if the event overlaps with the search month
+            # Two date ranges overlap if: start1 <= end2 AND start2 <= end1
+            if month_start <= event_end and event_start <= month_end:
                 matching_events.append(
                     {
                         "city": city_name,
@@ -53,12 +62,10 @@ def find_events(args: dict) -> dict:
                         "dateFrom": event["dateFrom"],
                         "dateTo": event["dateTo"],
                         "description": event["description"],
-                        "month": month_context,
                     }
                 )
 
-    # Add top-level metadata if you wish
     return {
-        "note": f"Returning events from {search_month} plus one month either side (i.e., {', '.join(datetime(2025, m, 1).strftime('%B') for m in valid_months)}).",
+        "note": f"Returning events that overlap with {search_month} {target_year}.",
         "events": matching_events,
     }

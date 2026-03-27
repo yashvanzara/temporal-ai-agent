@@ -6,7 +6,7 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 from models.data_types import ConversationHistory, ToolPromptInput
-from models.tool_definitions import AgentGoal
+from models.tool_definitions import AgentGoal, ToolDefinition
 from prompts.agent_prompt_generators import (
     generate_missing_args_prompt,
     generate_tool_completion_prompt,
@@ -21,63 +21,19 @@ LLM_ACTIVITY_SCHEDULE_TO_CLOSE_TIMEOUT = timedelta(minutes=30)
 
 
 def is_mcp_tool(tool_name: str, goal: AgentGoal) -> bool:
-    """Check if a tool is an MCP tool based on the goal's MCP server definition"""
+    """Check if a tool should be dispatched via MCP."""
     if not goal.mcp_server_definition:
         return False
 
-    # Check if the tool name matches any MCP tools that were loaded
-    # We can identify MCP tools by checking if they're not in the original static tools
-    from tools.tool_registry import (
-        book_pto_tool,
-        book_trains_tool,
-        change_goal_tool,
-        create_invoice_tool,
-        current_pto_tool,
-        ecomm_get_order,
-        ecomm_list_orders,
-        ecomm_track_package,
-        financial_check_account_is_valid,
-        financial_get_account_balances,
-        financial_move_money,
-        financial_submit_loan_approval,
-        find_events_tool,
-        food_add_to_cart_tool,
-        future_pto_calc_tool,
-        give_hint_tool,
-        guess_location_tool,
-        list_agents_tool,
-        paycheck_bank_integration_status_check,
-        search_fixtures_tool,
-        search_flights_tool,
-        search_trains_tool,
-    )
+    # Native tools are registered with tools.get_handler. If lookup succeeds,
+    # the tool should execute locally; otherwise treat it as MCP-provided.
+    from tools import get_handler
 
-    static_tool_names = {
-        list_agents_tool.name,
-        change_goal_tool.name,
-        give_hint_tool.name,
-        guess_location_tool.name,
-        search_flights_tool.name,
-        search_trains_tool.name,
-        book_trains_tool.name,
-        create_invoice_tool.name,
-        search_fixtures_tool.name,
-        find_events_tool.name,
-        current_pto_tool.name,
-        future_pto_calc_tool.name,
-        book_pto_tool.name,
-        paycheck_bank_integration_status_check.name,
-        financial_check_account_is_valid.name,
-        financial_get_account_balances.name,
-        financial_move_money.name,
-        financial_submit_loan_approval.name,
-        ecomm_list_orders.name,
-        ecomm_get_order.name,
-        ecomm_track_package.name,
-        food_add_to_cart_tool.name,
-    }
-
-    return tool_name not in static_tool_names
+    try:
+        get_handler(tool_name)
+        return False
+    except ValueError:
+        return True
 
 
 async def handle_tool_execution(
@@ -98,6 +54,13 @@ async def handle_tool_execution(
 
             # Add server definition to args for MCP tools
             mcp_args = tool_data["args"].copy()
+
+            # Stripe's MCP server enforces days_until_due when the collection
+            # method defaults to send_invoice. Provide a reasonable default when
+            # the planner omits it so invoice creation doesn't fail upstream.
+            if current_tool == "create_invoice" and "days_until_due" not in mcp_args:
+                mcp_args["days_until_due"] = 7
+
             mcp_args["server_definition"] = goal.mcp_server_definition
 
             dynamic_result = await workflow.execute_activity(
